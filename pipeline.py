@@ -1,12 +1,27 @@
 import sys
 import subprocess
+import json
 from faster_whisper import WhisperModel
 from pathlib import Path
 
 OUTPUT_DIR = Path.home() / "podcast-transcripts"
 
+def get_title(url):
+    result = subprocess.run(
+        ["python3", "-m", "yt_dlp", "--dump-json", "--no-download", url],
+        capture_output=True, text=True
+    )
+    info = json.loads(result.stdout)
+    # 去掉文件名不能用的特殊字符
+    title = info["title"]
+    for char in '/\\:*?"<>|':
+        title = title.replace(char, "_")
+    return title
+
 def run(url):
     video_id = url.split("v=")[-1].split("&")[0]
+    title = get_title(url)
+    print(f"标题：{title}")
 
     print("下载中...")
     subprocess.run(["python3", "-m", "yt_dlp", "-x", "--audio-format", "mp3",
@@ -17,26 +32,20 @@ def run(url):
     segments, _ = model.transcribe(str(OUTPUT_DIR / f"{video_id}.mp3"), language="zh")
     lines = list(segments)
 
-    sub_file = OUTPUT_DIR / f"{video_id}_subtitles.txt"
-    txt_file = OUTPUT_DIR / f"{video_id}_transcript.txt"
-
-    with open(sub_file, "w") as f:
+    with open(OUTPUT_DIR / f"{title}_subtitles.txt", "w") as f:
         for seg in lines:
             f.write(f"[{seg.start:.1f}s --> {seg.end:.1f}s] {seg.text}\n")
 
-    with open(txt_file, "w") as f:
+    with open(OUTPUT_DIR / f"{title}_transcript.txt", "w") as f:
         for seg in lines:
             f.write(seg.text + "\n")
 
-    # 自动提交到 git
-    print("提交到 git...")
     subprocess.run(["git", "-C", str(OUTPUT_DIR), "add", "."])
-    subprocess.run(["git", "-C", str(OUTPUT_DIR), "commit", "-m", f"transcript: {video_id}"])
+    subprocess.run(["git", "-C", str(OUTPUT_DIR), "commit", "-m", f"transcript: {title}"])
     subprocess.run(["git", "-C", str(OUTPUT_DIR), "push", "origin", "main"])
 
-    # 删除 mp3
-    mp3_file = OUTPUT_DIR / f"{video_id}.mp3"
-    mp3_file.unlink()
-    print(f"mp3 已删除，完成！{video_id}")
+    (OUTPUT_DIR / f"{video_id}.mp3").unlink()
+    print(f"完成！{title}")
 
-run(sys.argv[1])
+for url in sys.argv[1:]:
+    run(url)
